@@ -4,6 +4,7 @@ import hashlib
 import multiprocessing
 import os
 import queue
+import random
 import sqlite3
 import sys
 import threading
@@ -22,8 +23,8 @@ class DB:
         mtime: float,
         md5_hex: str
     ) -> None:
-        self._queue.put(('replace into files values (?, ?, ?, ?, ?, ?, ?)',
-                         (abs_path, base_name, dir_name, extension, size, mtime, md5_hex)))
+        self._queue.put_nowait(('replace into files values (?, ?, ?, ?, ?, ?, ?)',
+                                (abs_path, base_name, dir_name, extension, size, mtime, md5_hex)))
 
     def record_directory(
         self,
@@ -32,12 +33,18 @@ class DB:
         dir_count: int,
         symlink_count: int,
     ) -> None:
-        self._queue.put(('replace into directories values (?, ?, ?, ?, ?)',
-                         (abs_path, file_count, dir_count, symlink_count, time.time())))
+        self._queue.put_nowait(('replace into directories values (?, ?, ?, ?, ?)',
+                                (abs_path, file_count, dir_count, symlink_count, time.time())))
 
     def record_symlink(self, abs_path: str, target: str) -> None:
-        self._queue.put((
+        self._queue.put_nowait((
             'replace into symlinks values (?, ?)', (abs_path, target)))
+
+    def record_failure(self, abs_path: str, e: Exception) -> None:
+        self._queue.put_nowait((
+            'replace into failures values(?, ?, ?)', (abs_path,
+                                                      time.time(), str(e))
+        ))
 
     def stop(self) -> None:
         self._queue.put("STOP")
@@ -46,11 +53,14 @@ class DB:
         dbh = sqlite3.connect(self._path)
         while True:
             try:
+                if random.random() < 0.007:
+                    print("Write queue length: %d" % (self._queue.qsize()))
                 op = self._queue.get(timeout=1)
                 if op == "STOP":
                     dbh.commit()
                     return
                 dbh.execute(*op)
+                raise RuntimeError()
             except queue.Empty:
                 dbh.commit()
 
@@ -65,7 +75,11 @@ class Scanner:
         """Grab work from the queue until it has been empty for 60s."""
         try:
             while True:
-                self._scan_dir(self._queue.get(timeout=60))
+                abs_path = self._queue.get(timeout=60)
+                try:
+                    self._scan_dir(abs_path)
+                except Exception as e:
+                    self._db.record_failure(abs_path, e)
         except queue.Empty:
             print("Thread finished after 60s of empty queue.")
 
@@ -128,10 +142,11 @@ def main():
     parser.add_argument('--workers', type=int, default=os.cpu_count() * 2)
     parser.add_argument('--threading', type=bool, default=False)
     parser.add_argument('--queue_length', type=int, default=0)
+    parser.add_argument('--writer_queue_length', type=int, default=1000)
     args = parser.parse_args(sys.argv)
     if args.threading:
         que = queue.Queue(maxsize=args.queue_length)
-        dque = queue.Queue(maxsize=args.queue_length)
+        dque = queue.Queue(maxsize=args.writer_queue_length)
     else:
         que = multiprocessing.Queue(maxsize=args.queue_length)
         dque = multiprocessing.Queue(maxsize=args.queue_length)

@@ -21,4 +21,11 @@ create table symlinks (
     target text    
 );
 
+create table failures (
+    abs_path text,
+    when timestamp,
+    details text,
+    primary key (abs_path, when)
+);
+
 create index file_md5_hex on files (md5_hex);
