@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import fnmatch
 import hashlib
 import multiprocessing
 import os
@@ -9,6 +10,7 @@ import sqlite3
 import sys
 import threading
 import time
+from typing import List
 
 
 class DB:
@@ -60,7 +62,6 @@ class DB:
                     dbh.commit()
                     return
                 dbh.execute(*op)
-                raise RuntimeError()
             except queue.Empty:
                 dbh.commit()
 
@@ -97,7 +98,8 @@ class Scanner:
             name = item.name
             abs_item = os.path.join(path, name)
             if item.is_dir():
-                self.enqueue(abs_item)
+                if not self._ignored(name):
+                    self.enqueue(abs_item)
                 dir_count += 1
             elif item.is_file():
                 files.append(item)
@@ -109,6 +111,12 @@ class Scanner:
             self._process_file(item)
         self._db.record_directory(
             path, len(files), dir_count, symlink_count)
+    
+    def _ignored(self, name: str) -> bool:
+        for pattern in self._ignore:
+            if fnmatch.fnmatch(name, pattern):
+                return True
+        return False
 
     def _process_file(self, entry: os.DirEntry) -> None:
         abs_path = entry.path
@@ -121,9 +129,10 @@ class Scanner:
         self._db.record_file(abs_path, name, os.path.dirname(
             abs_path), extension, stat.st_size, stat.st_mtime, md5(abs_path))
 
-    def __init__(self, db: DB, que: queue.Queue):
+    def __init__(self, db: DB, que: queue.Queue, ignore: List[str]):
         self._db = db
         self._queue = que
+        self._ignore = ignore
 
 
 def md5(fname: str):
@@ -133,6 +142,9 @@ def md5(fname: str):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
+def str_list(input: str) -> List[str]:
+    """Parses a list of comma-separated strings into a list of str."""
+    return input.split(',')
 
 def main():
     parser = argparse.ArgumentParser(
@@ -143,6 +155,9 @@ def main():
     parser.add_argument('--threading', type=bool, default=False)
     parser.add_argument('--queue_length', type=int, default=0)
     parser.add_argument('--writer_queue_length', type=int, default=1000)
+    # `.backupdb` is extension used by Time Machine. It uses directory hard
+    # links, which confuse rsync. 
+    parser.add_argument('--ignore', type=str_list, default="*.backupdb")
     args = parser.parse_args(sys.argv)
     if args.threading:
         que = queue.Queue(maxsize=args.queue_length)
@@ -151,7 +166,7 @@ def main():
         que = multiprocessing.Queue(maxsize=args.queue_length)
         dque = multiprocessing.Queue(maxsize=args.queue_length)
     db = DB(args.db, dque)
-    scanner = Scanner(db, que)
+    scanner = Scanner(db, que, args.ignore)
     for path in args.paths:
         scanner.enqueue(os.path.abspath(path))
     working_class = threading.Thread if args.threading else multiprocessing.Process

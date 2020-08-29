@@ -23,9 +23,9 @@ create table symlinks (
 
 create table failures (
     abs_path text,
-    when timestamp,
+    time_ timestamp,
     details text,
-    primary key (abs_path, when)
+    primary key (abs_path, time_)
 );
 
 create index file_md5_hex on files (md5_hex);
