@@ -2,6 +2,7 @@
 import argparse
 import fnmatch
 import hashlib
+import itertools
 import multiprocessing
 import os
 import queue
@@ -10,7 +11,7 @@ import sqlite3
 import sys
 import threading
 import time
-from typing import List
+from typing import List, Set
 
 
 class DB:
@@ -50,6 +51,13 @@ class DB:
 
     def stop(self) -> None:
         self._queue.put("STOP")
+
+    def get_done_dirs(self) -> Set[str]:
+        dbh = sqlite3.connect(self._path)
+        done_dirs = set(itertools.chain.from_iterable(dbh.execute(
+            "select abs_path from directories").fetchall()))
+        dbh.close()
+        return done_dirs
 
     def writer_loop(self):
         dbh = sqlite3.connect(self._path)
@@ -107,6 +115,8 @@ class Scanner:
                 assert item.is_symlink()
                 self._db.record_symlink(abs_item, os.readlink(abs_item))
                 symlink_count += 1
+        if path in self._done_dirs:
+            return
         for item in files:
             self._process_file(item)
         self._db.record_directory(
@@ -129,10 +139,11 @@ class Scanner:
         self._db.record_file(abs_path, name, os.path.dirname(
             abs_path), extension, stat.st_size, stat.st_mtime, md5(abs_path))
 
-    def __init__(self, db: DB, que: queue.Queue, ignore: List[str]):
+    def __init__(self, db: DB, que: queue.Queue, ignore: List[str], done_dirs: Set[str]):
         self._db = db
         self._queue = que
         self._ignore = ignore
+        self._done_dirs = done_dirs
 
 
 def md5(fname: str):
@@ -166,7 +177,7 @@ def main():
         que = multiprocessing.Queue(maxsize=args.queue_length)
         dque = multiprocessing.Queue(maxsize=args.queue_length)
     db = DB(args.db, dque)
-    scanner = Scanner(db, que, args.ignore)
+    scanner = Scanner(db, que, args.ignore, db.get_done_dirs())
     for path in args.paths:
         scanner.enqueue(os.path.abspath(path))
     working_class = threading.Thread if args.threading else multiprocessing.Process
