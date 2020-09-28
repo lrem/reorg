@@ -98,11 +98,12 @@ class Scanner:
 
     def _scan_dir(self, path: str):
         """Add subdirectories to the queue and process files."""
-        print("Processing %s (%d in queue)" % (path, self._queue.qsize()))
+        done = path in self._done_dirs
+        print("%sProcessing %s (%d in queue)" %
+              ("Re-" if done else "", path, self._queue.qsize()))
         files = []
         dir_count = 0
         symlink_count = 0
-        done = path in self._done_dirs
         for item in os.scandir(path):
             name = item.name
             abs_item = os.path.join(path, name)
