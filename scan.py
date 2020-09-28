@@ -102,6 +102,7 @@ class Scanner:
         files = []
         dir_count = 0
         symlink_count = 0
+        done = path in self._done_dirs
         for item in os.scandir(path):
             name = item.name
             abs_item = os.path.join(path, name)
@@ -109,18 +110,18 @@ class Scanner:
                 if not self._ignored(name):
                     self.enqueue(abs_item)
                 dir_count += 1
-            elif item.is_file():
-                files.append(item)
-            else:
-                assert item.is_symlink()
-                self._db.record_symlink(abs_item, os.readlink(abs_item))
-                symlink_count += 1
-        if path in self._done_dirs:
-            return
-        for item in files:
-            self._process_file(item)
-        self._db.record_directory(
-            path, len(files), dir_count, symlink_count)
+            elif not done:
+                if item.is_file():
+                    files.append(item)
+                else:
+                    assert item.is_symlink()
+                    self._db.record_symlink(abs_item, os.readlink(abs_item))
+                    symlink_count += 1
+        if not done:
+            for item in files:
+                self._process_file(item)
+            self._db.record_directory(
+                path, len(files), dir_count, symlink_count)
     
     def _ignored(self, name: str) -> bool:
         for pattern in self._ignore:
