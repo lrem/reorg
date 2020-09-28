@@ -26,7 +26,7 @@ class DB:
         mtime: float,
         md5_hex: str
     ) -> None:
-        self._queue.put_nowait(('replace into files values (?, ?, ?, ?, ?, ?, ?)',
+        self._queue.put(('replace into files values (?, ?, ?, ?, ?, ?, ?)',
                                 (abs_path, base_name, dir_name, extension, size, mtime, md5_hex)))
 
     def record_directory(
@@ -36,15 +36,15 @@ class DB:
         dir_count: int,
         symlink_count: int,
     ) -> None:
-        self._queue.put_nowait(('replace into directories values (?, ?, ?, ?, ?)',
+        self._queue.put(('replace into directories values (?, ?, ?, ?, ?)',
                                 (abs_path, file_count, dir_count, symlink_count, time.time())))
 
     def record_symlink(self, abs_path: str, target: str) -> None:
-        self._queue.put_nowait((
+        self._queue.put((
             'replace into symlinks values (?, ?)', (abs_path, target)))
 
     def record_failure(self, abs_path: str, e: Exception) -> None:
-        self._queue.put_nowait((
+        self._queue.put((
             'replace into failures values(?, ?, ?)', (abs_path,
                                                       time.time(), str(e))
         ))
