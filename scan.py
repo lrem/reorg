@@ -2,7 +2,6 @@
 import argparse
 import fnmatch
 import hashlib
-import itertools
 import multiprocessing
 import os
 import queue
@@ -11,7 +10,7 @@ import sqlite3
 import sys
 import threading
 import time
-from typing import List, Set
+from typing import List, Set, Tuple
 
 
 class DB:
@@ -52,12 +51,34 @@ class DB:
     def stop(self) -> None:
         self._queue.put("STOP")
 
-    def get_done_dirs(self) -> Set[str]:
+    def get_done(self) -> Tuple[Set[str], Set[str]]:
+        """Return sets of absolute paths: 
+        - to directories where file scanning was done;
+        - to directory trees where the full recursion was done.
+        """
         dbh = sqlite3.connect(self._path)
-        done_dirs = set(itertools.chain.from_iterable(dbh.execute(
-            "select abs_path from directories").fetchall()))
+        counts = dict(dbh.execute("select abs_path, dir_count from directories"))
         dbh.close()
-        return done_dirs
+        queue = []
+        done_trees = set()
+
+        def process_empty(path):
+            done_trees.add(path)
+            parent = os.path.dirname(path)
+            if parent not in counts:
+                print("Done up to root: %s" % path)
+                return
+            counts[parent] -= 1
+            if counts[parent] == 0:
+                queue.append(parent)
+
+        for path in counts:
+            if counts[path] == 0:
+                process_empty(path)
+        while len(queue) != 0:
+            process_empty(queue.pop())
+        print("Done: %d directories %d trees" % (len(counts), len(done_trees)))
+        return set(counts.keys()), done_trees
 
     def writer_loop(self):
         dbh = sqlite3.connect(self._path)
@@ -98,6 +119,8 @@ class Scanner:
 
     def _scan_dir(self, path: str):
         """Add subdirectories to the queue and process files."""
+        if path in self._done_trees:
+            return
         done = path in self._done_dirs
         print("%sProcessing %s (%d in queue)" %
               ("Re-" if done else "", path, self._queue.qsize()))
@@ -141,11 +164,13 @@ class Scanner:
         self._db.record_file(abs_path, name, os.path.dirname(
             abs_path), extension, stat.st_size, stat.st_mtime, md5(abs_path))
 
-    def __init__(self, db: DB, que: queue.Queue, ignore: List[str], done_dirs: Set[str]):
+    def __init__(self, db: DB, que: queue.Queue, ignore: List[str],
+                 done_dirs: Set[str], done_trees: Set[str]):
         self._db = db
         self._queue = que
         self._ignore = ignore
         self._done_dirs = done_dirs
+        self._done_trees = done_trees
 
 
 def md5(fname: str):
@@ -179,7 +204,8 @@ def main():
         que = multiprocessing.Queue(maxsize=args.queue_length)
         dque = multiprocessing.Queue(maxsize=args.queue_length)
     db = DB(args.db, dque)
-    scanner = Scanner(db, que, args.ignore, db.get_done_dirs())
+    done_dirs, done_trees = db.get_done()
+    scanner = Scanner(db, que, args.ignore, done_dirs, done_trees)
     for path in args.paths:
         scanner.enqueue(os.path.abspath(path))
     working_class = threading.Thread if args.threading else multiprocessing.Process
