@@ -173,7 +173,7 @@ def main():
     parser.add_argument('--ignore', type=str_list, default="*.backupdb")
     args = parser.parse_args(sys.argv)
     if args.threading:
-        que = queue.Queue(maxsize=args.queue_length)
+        que = queue.Queue(maxsize=args.writer_queue_length)
         dque = queue.Queue(maxsize=args.writer_queue_length)
     else:
         que = multiprocessing.Queue(maxsize=args.queue_length)
