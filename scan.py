@@ -91,6 +91,8 @@ class DB:
                     dbh.commit()
                     return
                 dbh.execute(*op)
+                if random.random() < 0.01:
+                    dbh.commit()
             except queue.Empty:
                 dbh.commit()
 
