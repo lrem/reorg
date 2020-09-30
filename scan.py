@@ -200,11 +200,11 @@ def main():
     parser.add_argument('--ignore', type=str_list, default="*.backupdb")
     args = parser.parse_args(sys.argv)
     if args.threading:
-        que = queue.Queue(maxsize=args.writer_queue_length)
+        que = queue.Queue(maxsize=args.queue_length)
         dque = queue.Queue(maxsize=args.writer_queue_length)
     else:
         que = multiprocessing.Queue(maxsize=args.queue_length)
-        dque = multiprocessing.Queue(maxsize=args.queue_length)
+        dque = multiprocessing.Queue(maxsize=args.writer_queue_length)
     db = DB(args.db, dque)
     done_dirs, done_trees = db.get_done()
     scanner = Scanner(db, que, args.ignore, done_dirs, done_trees)
